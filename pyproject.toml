@@ -1,7 +1,16 @@
 [project]
 name = "ding"
 version = "0.1.0"
-description = "Add your description here"
+description = "A doorbell app with QR code scanning and gRPC video streaming"
 readme = "README.md"
-requires-python = ">=3.13"
-dependencies = []
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.104.0",
+    "uvicorn[standard]>=0.24.0",
+    "grpcio>=1.60.0",
+    "grpcio-tools>=1.60.0",
+    "qrcode[pil]>=7.4.2",
+    "websockets>=12.0",
+    "pydantic>=2.5.0",
+    "python-multipart>=0.0.6",
+]
