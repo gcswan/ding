@@ -21,6 +21,7 @@ from dataclasses import dataclass
 @dataclass
 class ServerConfig:
     """Server configuration settings."""
+
     host: str = "0.0.0.0"
     port: int = 8000
     reload: bool = False
@@ -35,6 +36,7 @@ class ServerConfig:
 @dataclass
 class GrpcConfig:
     """gRPC services configuration."""
+
     video_port: int = 50051
     doorbell_port: int = 50052
     max_workers: int = 10
@@ -48,6 +50,7 @@ class GrpcConfig:
 @dataclass
 class DatabaseConfig:
     """Database configuration (for future implementation)."""
+
     # TODO: Add database configuration when implemented
     # url: Optional[str] = None
     # pool_size: int = 10
@@ -58,6 +61,7 @@ class DatabaseConfig:
 @dataclass
 class NotificationConfig:
     """Notification service configuration."""
+
     # TODO: Add push notification service configuration
     # fcm_server_key: Optional[str] = None
     # apns_key_id: Optional[str] = None
@@ -69,6 +73,7 @@ class NotificationConfig:
 @dataclass
 class AppConfig:
     """Main application configuration."""
+
     environment: str = "development"
     debug: bool = True
     version: str = "0.1.0"
@@ -105,9 +110,15 @@ def load_config() -> AppConfig:
     config.server.workers = int(os.getenv("DING_WORKERS", str(config.server.workers)))
 
     # gRPC configuration
-    config.grpc.video_port = int(os.getenv("DING_GRPC_VIDEO_PORT", str(config.grpc.video_port)))
-    config.grpc.doorbell_port = int(os.getenv("DING_GRPC_DOORBELL_PORT", str(config.grpc.doorbell_port)))
-    config.grpc.max_workers = int(os.getenv("DING_GRPC_MAX_WORKERS", str(config.grpc.max_workers)))
+    config.grpc.video_port = int(
+        os.getenv("DING_GRPC_VIDEO_PORT", str(config.grpc.video_port))
+    )
+    config.grpc.doorbell_port = int(
+        os.getenv("DING_GRPC_DOORBELL_PORT", str(config.grpc.doorbell_port))
+    )
+    config.grpc.max_workers = int(
+        os.getenv("DING_GRPC_MAX_WORKERS", str(config.grpc.max_workers))
+    )
 
     # TODO: Load database configuration
     # TODO: Load notification service configuration
@@ -130,3 +141,4 @@ def get_config() -> AppConfig:
         get_config._config = load_config()
 
     return get_config._config
+
