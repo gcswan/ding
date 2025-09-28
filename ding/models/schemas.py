@@ -24,14 +24,6 @@ class ResponseType(str, Enum):
     CUSTOM = "custom"
 
 
-class NotificationType(str, Enum):
-    """Types of notifications sent to door owners."""
-    DING_REQUEST = "ding_request"
-    DING_TIMEOUT = "ding_timeout"
-    DING_ACCEPTED = "ding_accepted"
-    DING_REJECTED = "ding_rejected"
-
-
 class QRCodeScanRequest(BaseModel):
     """Request model for QR code scanning."""
     qr_code_id: str = Field(..., description="Unique QR code identifier")
@@ -74,28 +66,6 @@ class DingResponseResult(BaseModel):
     """Result of door owner's response to a ding."""
     success: bool = Field(..., description="Whether the response was processed successfully")
     message: str = Field(..., description="Result message")
-    video_session_id: Optional[str] = Field(None, description="Video session ID if accepted")
-
-    # TODO: Add connection details for video session
-    # video_server_host: Optional[str] = None
-    # video_server_port: Optional[int] = None
-    # session_token: Optional[str] = None
-
-
-class NotificationModel(BaseModel):
-    """Notification sent to door owners."""
-    notification_id: str = Field(..., description="Unique notification identifier")
-    door_owner_id: str = Field(..., description="ID of the door owner")
-    scanner_device_id: str = Field(..., description="ID of the scanning device")
-    notification_type: NotificationType = Field(..., description="Type of notification")
-    message: str = Field(..., description="Notification message")
-    timestamp: datetime = Field(..., description="Notification timestamp")
-    session_id: Optional[str] = Field(None, description="Associated session ID")
-
-    # TODO: Add rich notification content
-    # image_url: Optional[str] = None
-    # sound_url: Optional[str] = None
-    # priority: Optional[int] = None
 
 
 class QRCodeGenerationRequest(BaseModel):
@@ -131,20 +101,15 @@ class QRCodeGenerationResponse(BaseModel):
     # last_scanned: Optional[datetime] = None
 
 
-class VideoSessionInfo(BaseModel):
-    """Information about a video chat session."""
+class SessionInfo(BaseModel):
+    """Information about a ding session."""
     session_id: str = Field(..., description="Unique session identifier")
     door_owner_id: str = Field(..., description="ID of the door owner")
     visitor_device_id: str = Field(..., description="ID of the visitor device")
     status: str = Field(..., description="Current session status")
     created_at: datetime = Field(..., description="Session creation time")
-    started_at: Optional[datetime] = Field(None, description="Session start time")
-    ended_at: Optional[datetime] = Field(None, description="Session end time")
-
-    # TODO: Add session quality metrics
-    # duration_seconds: Optional[int] = None
-    # video_quality: Optional[str] = None
-    # connection_quality: Optional[str] = None
+    responded_at: Optional[datetime] = Field(None, description="Door owner response time")
+    response_type: Optional[str] = Field(None, description="Door owner response type")
 
 
 class ErrorResponse(BaseModel):

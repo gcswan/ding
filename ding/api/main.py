@@ -1,14 +1,14 @@
 """
 FastAPI REST API for the Ding Doorbell Application
 
-This module provides HTTP REST endpoints that complement the gRPC services.
+This module provides HTTP REST endpoints for the Ding doorbell service.
 It's designed to be mobile-friendly and provides easy integration for web clients.
 
 ARCHITECTURE OVERVIEW:
 - REST API for mobile clients and web interfaces
-- Bridges between HTTP clients and gRPC services
 - Handles QR code generation and management
 - Provides WebSocket endpoints for real-time notifications
+- Dispatches SMS and Microsoft Teams alerts
 - TODO: Add authentication and authorization middleware
 - TODO: Implement rate limiting and request validation
 - TODO: Add comprehensive API documentation
@@ -33,7 +33,7 @@ from ..models.schemas import (
     DingResponseResult,
     QRCodeGenerationRequest,
     QRCodeGenerationResponse,
-    VideoSessionInfo,
+    SessionInfo,
     HealthCheck,
 )
 from ..utils.config import get_config
@@ -82,7 +82,6 @@ async def health_check():
     uptime = int((datetime.now() - store.start_time).total_seconds())
 
     # TODO: Add checks for dependent services
-    # - gRPC server status
     # - Database connectivity
     # - External service availability
 
@@ -101,7 +100,7 @@ async def scan_qr_code(request: QRCodeScanRequest):
     This endpoint:
     1. Validates the QR code
     2. Creates a new ding session
-    3. Sends notification to door owner (via gRPC or WebSocket)
+    3. Sends notification to the door owner (WebSocket plus external channels)
     4. Returns session information to the scanner
 
     TODO: Add rate limiting per device
@@ -157,8 +156,7 @@ async def respond_to_ding(response: DingResponse):
     When a door owner responds:
     1. Validate the session
     2. Update session status
-    3. If accepted, initiate video chat session
-    4. Notify the scanner about the response
+    3. Notify the scanner about the response
 
     TODO: Add authentication for door owners
     TODO: Implement response templates
@@ -191,27 +189,18 @@ async def respond_to_ding(response: DingResponse):
     )
 
     if response.response_type.value == "accept":
-        # Create video session
-        video_session_id = f"video_{response.session_id}"
         await store.update_session(
             response.session_id,
-            {
-                "video_session_id": video_session_id,
-                "status": "video_chat_starting",
-            },
+            {"status": "accepted"},
         )
 
-        # TODO: Initialize video chat session with gRPC video service
-        # TODO: Send connection details to both clients
+        message = "Door owner accepted the ding request."
 
-        message = "Ding accepted. Video chat session starting."
-
-        logger.info(f"Video session {video_session_id} created for {response.session_id}")
+        logger.info("Session %s accepted by door owner", response.session_id)
 
         return DingResponseResult(
             success=True,
             message=message,
-            video_session_id=video_session_id
         )
 
     else:
@@ -231,7 +220,6 @@ async def respond_to_ding(response: DingResponse):
         return DingResponseResult(
             success=True,
             message=message,
-            video_session_id=None
         )
 
 
@@ -319,7 +307,7 @@ async def generate_qr_code(request: QRCodeGenerationRequest):
     )
 
 
-@app.get("/sessions/{session_id}", response_model=VideoSessionInfo)
+@app.get("/sessions/{session_id}", response_model=SessionInfo)
 async def get_session_info(session_id: str):
     """
     Get information about a specific session.
@@ -331,14 +319,14 @@ async def get_session_info(session_id: str):
     if not session_data:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    return VideoSessionInfo(
+    return SessionInfo(
         session_id=session_data["session_id"],
         door_owner_id=session_data["door_owner_id"],
         visitor_device_id=session_data["scanner_device_id"],
         status=session_data["status"],
         created_at=session_data["created_at"],
-        started_at=session_data.get("started_at"),
-        ended_at=session_data.get("ended_at")
+        responded_at=session_data.get("responded_at"),
+        response_type=session_data.get("response_type"),
     )
 
 
@@ -347,7 +335,7 @@ async def websocket_notifications(websocket: WebSocket, door_owner_id: str):
     """
     WebSocket endpoint for real-time notifications to door owners.
 
-    This provides an alternative to gRPC streaming for web clients
+    This provides an alternative to SMS/Teams alerts for web clients
     and mobile apps that prefer WebSocket connections.
 
     TODO: Add authentication and authorization

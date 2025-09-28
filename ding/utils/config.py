@@ -34,20 +34,6 @@ class ServerConfig:
 
 
 @dataclass
-class GrpcConfig:
-    """gRPC services configuration."""
-
-    video_port: int = 50051
-    doorbell_port: int = 50052
-    max_workers: int = 10
-
-    # TODO: Add gRPC-specific settings
-    # max_message_size: int = 4 * 1024 * 1024  # 4MB
-    # compression: str = "gzip"
-    # keepalive_time: int = 30
-
-
-@dataclass
 class DatabaseConfig:
     """Database configuration (for future implementation)."""
 
@@ -88,7 +74,6 @@ class AppConfig:
     version: str = "0.1.0"
 
     server: ServerConfig = field(default_factory=ServerConfig)
-    grpc: GrpcConfig = field(default_factory=GrpcConfig)
     database: DatabaseConfig = field(default_factory=DatabaseConfig)
     notifications: NotificationConfig = field(default_factory=NotificationConfig)
 
@@ -117,17 +102,6 @@ def load_config() -> AppConfig:
     config.server.port = int(os.getenv("DING_PORT", str(config.server.port)))
     config.server.log_level = os.getenv("DING_LOG_LEVEL", config.server.log_level)
     config.server.workers = int(os.getenv("DING_WORKERS", str(config.server.workers)))
-
-    # gRPC configuration
-    config.grpc.video_port = int(
-        os.getenv("DING_GRPC_VIDEO_PORT", str(config.grpc.video_port))
-    )
-    config.grpc.doorbell_port = int(
-        os.getenv("DING_GRPC_DOORBELL_PORT", str(config.grpc.doorbell_port))
-    )
-    config.grpc.max_workers = int(
-        os.getenv("DING_GRPC_MAX_WORKERS", str(config.grpc.max_workers))
-    )
 
     _load_notification_config(config)
 
