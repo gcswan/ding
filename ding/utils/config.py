@@ -14,8 +14,8 @@ TODO: Support multiple configuration formats (YAML, TOML, JSON)
 """
 
 import os
-from typing import Optional, Dict, Any
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import List, Optional
 
 
 @dataclass
@@ -62,12 +62,21 @@ class DatabaseConfig:
 class NotificationConfig:
     """Notification service configuration."""
 
+    sms_enabled: bool = False
+    twilio_account_sid: Optional[str] = None
+    twilio_auth_token: Optional[str] = None
+    twilio_from_number: Optional[str] = None
+    sms_default_recipients: List[str] = field(default_factory=list)
+
+    teams_enabled: bool = False
+    teams_default_webhook: Optional[str] = None
+    teams_timeout_seconds: float = 5.0
+
     # TODO: Add push notification service configuration
     # fcm_server_key: Optional[str] = None
     # apns_key_id: Optional[str] = None
     # apns_team_id: Optional[str] = None
     # apns_key_file: Optional[str] = None
-    pass
 
 
 @dataclass
@@ -78,10 +87,10 @@ class AppConfig:
     debug: bool = True
     version: str = "0.1.0"
 
-    server: ServerConfig = ServerConfig()
-    grpc: GrpcConfig = GrpcConfig()
-    database: DatabaseConfig = DatabaseConfig()
-    notifications: NotificationConfig = NotificationConfig()
+    server: ServerConfig = field(default_factory=ServerConfig)
+    grpc: GrpcConfig = field(default_factory=GrpcConfig)
+    database: DatabaseConfig = field(default_factory=DatabaseConfig)
+    notifications: NotificationConfig = field(default_factory=NotificationConfig)
 
     # TODO: Add feature flags
     # enable_analytics: bool = True
@@ -101,7 +110,7 @@ def load_config() -> AppConfig:
 
     # Load environment-specific overrides
     config.environment = os.getenv("DING_ENVIRONMENT", config.environment)
-    config.debug = os.getenv("DING_DEBUG", "true").lower() == "true"
+    config.debug = _get_env_bool("DING_DEBUG", config.debug)
 
     # Server configuration
     config.server.host = os.getenv("DING_HOST", config.server.host)
@@ -120,11 +129,59 @@ def load_config() -> AppConfig:
         os.getenv("DING_GRPC_MAX_WORKERS", str(config.grpc.max_workers))
     )
 
+    _load_notification_config(config)
+
     # TODO: Load database configuration
     # TODO: Load notification service configuration
     # TODO: Validate configuration values
 
     return config
+
+
+def _get_env_bool(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _parse_recipients(raw: Optional[str]) -> List[str]:
+    if not raw:
+        return []
+    return [item.strip() for item in raw.split(",") if item.strip()]
+
+
+def _load_notification_config(config: AppConfig) -> None:
+    notifications = config.notifications
+
+    notifications.sms_enabled = _get_env_bool(
+        "DING_SMS_ENABLED", notifications.sms_enabled
+    )
+    notifications.twilio_account_sid = os.getenv(
+        "DING_TWILIO_ACCOUNT_SID", notifications.twilio_account_sid
+    )
+    notifications.twilio_auth_token = os.getenv(
+        "DING_TWILIO_AUTH_TOKEN", notifications.twilio_auth_token
+    )
+    notifications.twilio_from_number = os.getenv(
+        "DING_TWILIO_FROM_NUMBER", notifications.twilio_from_number
+    )
+    notifications.sms_default_recipients = _parse_recipients(
+        os.getenv("DING_SMS_RECIPIENTS")
+    ) or notifications.sms_default_recipients
+
+    notifications.teams_enabled = _get_env_bool(
+        "DING_TEAMS_ENABLED", notifications.teams_enabled
+    )
+    notifications.teams_default_webhook = os.getenv(
+        "DING_TEAMS_WEBHOOK", notifications.teams_default_webhook
+    )
+    timeout_raw = os.getenv("DING_TEAMS_TIMEOUT")
+    if timeout_raw:
+        try:
+            notifications.teams_timeout_seconds = float(timeout_raw)
+        except ValueError:
+            pass
 
 
 def get_config() -> AppConfig:
@@ -141,4 +198,3 @@ def get_config() -> AppConfig:
         get_config._config = load_config()
 
     return get_config._config
-

@@ -103,6 +103,14 @@ class QRCodeGenerationRequest(BaseModel):
     door_owner_id: str = Field(..., description="ID of the door owner")
     label: Optional[str] = Field(None, description="Optional label for the QR code")
     expiry_date: Optional[datetime] = Field(None, description="Optional expiry date")
+    sms_recipients: Optional[List[str]] = Field(
+        None,
+        description="Phone numbers that should receive SMS alerts for this QR code",
+    )
+    teams_webhook_url: Optional[str] = Field(
+        None,
+        description="Microsoft Teams webhook URL for ding notifications",
+    )
 
     # TODO: Add QR code customization options
     # logo_url: Optional[str] = None

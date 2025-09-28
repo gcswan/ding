@@ -15,34 +15,34 @@ ARCHITECTURE OVERVIEW:
 """
 
 import asyncio
-import logging
-import time
-from datetime import datetime
-from typing import List, Optional
-import qrcode
-import io
 import base64
+import io
+import logging
+import uuid
+from datetime import datetime
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks, WebSocket, WebSocketDisconnect
+import qrcode
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 
 # Import our models
 from ..models.schemas import (
-    QRCodeScanRequest, QRCodeScanResponse,
-    DingResponse, DingResponseResult,
-    QRCodeGenerationRequest, QRCodeGenerationResponse,
-    NotificationModel, VideoSessionInfo,
-    ErrorResponse, HealthCheck
+    QRCodeScanRequest,
+    QRCodeScanResponse,
+    DingResponse,
+    DingResponseResult,
+    QRCodeGenerationRequest,
+    QRCodeGenerationResponse,
+    VideoSessionInfo,
+    HealthCheck,
 )
+from ..utils.config import get_config
+from ..utils.notifications import NotificationManager
+from ..utils.store import OwnerContact, store
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-# TODO: Load configuration from environment variables
-# TODO: Add proper database connection
-# TODO: Configure external services (push notifications, etc.)
 
 app = FastAPI(
     title="Ding Doorbell API",
@@ -52,6 +52,9 @@ app = FastAPI(
     redoc_url="/redoc"
 )
 
+config = get_config()
+notification_manager = NotificationManager(config.notifications)
+
 # Configure CORS - TODO: Restrict to specific domains in production
 app.add_middleware(
     CORSMiddleware,
@@ -60,17 +63,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Application state
-# TODO: Replace with proper database and cache
-app_state = {
-    "start_time": time.time(),
-    "qr_codes": {},  # qr_code_id -> metadata
-    "sessions": {},  # session_id -> session_data
-    "door_owners": {},  # door_owner_id -> owner_data
-    "websocket_connections": {},  # door_owner_id -> websocket
-}
-
 
 @app.get("/", response_model=dict)
 async def root():
@@ -87,7 +79,7 @@ async def root():
 @app.get("/health", response_model=HealthCheck)
 async def health_check():
     """Health check endpoint for monitoring and load balancers."""
-    uptime = int(time.time() - app_state["start_time"])
+    uptime = int((datetime.now() - store.start_time).total_seconds())
 
     # TODO: Add checks for dependent services
     # - gRPC server status
@@ -116,35 +108,36 @@ async def scan_qr_code(request: QRCodeScanRequest):
     TODO: Implement geolocation validation
     TODO: Add abuse detection and prevention
     """
-    logger.info(f"QR code scan request: {request.qr_code_id} from {request.scanner_device_id}")
+    logger.info(
+        "QR code scan request: %s from %s",
+        request.qr_code_id,
+        request.scanner_device_id,
+    )
 
-    # Validate QR code exists
-    if request.qr_code_id not in app_state["qr_codes"]:
+    qr_data = await store.get_qr_code(request.qr_code_id)
+    if not qr_data:
         raise HTTPException(
             status_code=404,
             detail="QR code not found or expired"
         )
 
-    qr_data = app_state["qr_codes"][request.qr_code_id]
     door_owner_id = qr_data["door_owner_id"]
 
-    # Create new session
-    session_id = f"session_{int(time.time())}_{request.scanner_device_id[:8]}"
+    session_id = f"session_{uuid.uuid4().hex}"
+    created_at = datetime.now()
 
     session_data = {
         "session_id": session_id,
         "door_owner_id": door_owner_id,
         "scanner_device_id": request.scanner_device_id,
         "qr_code_id": request.qr_code_id,
-        "created_at": datetime.now(),
+        "created_at": created_at,
         "status": "pending",
-        "scanner_location": request.scanner_location
+        "scanner_location": request.scanner_location,
     }
 
-    app_state["sessions"][session_id] = session_data
+    await store.add_session(session_id, session_data)
 
-    # TODO: Send notification to door owner via gRPC service
-    # TODO: Implement WebSocket notification as fallback
     await _notify_door_owner(door_owner_id, session_data)
 
     return QRCodeScanResponse(
@@ -173,33 +166,40 @@ async def respond_to_ding(response: DingResponse):
     """
     logger.info(f"Ding response: {response.response_type} for session {response.session_id}")
 
-    # Validate session exists
-    if response.session_id not in app_state["sessions"]:
+    session_data = await store.get_session(response.session_id)
+    if not session_data:
         raise HTTPException(
             status_code=404,
             detail="Session not found or expired"
         )
 
-    session_data = app_state["sessions"][response.session_id]
-
-    # Validate door owner
     if session_data["door_owner_id"] != response.door_owner_id:
         raise HTTPException(
             status_code=403,
             detail="Unauthorized to respond to this session"
         )
 
-    # Update session
-    session_data["status"] = "responded"
-    session_data["response_type"] = response.response_type.value
-    session_data["response_message"] = response.custom_message
-    session_data["responded_at"] = datetime.now()
+    now = datetime.now()
+    await store.update_session(
+        response.session_id,
+        {
+            "status": "responded",
+            "response_type": response.response_type.value,
+            "response_message": response.custom_message,
+            "responded_at": now,
+        },
+    )
 
     if response.response_type.value == "accept":
         # Create video session
         video_session_id = f"video_{response.session_id}"
-        session_data["video_session_id"] = video_session_id
-        session_data["status"] = "video_chat_starting"
+        await store.update_session(
+            response.session_id,
+            {
+                "video_session_id": video_session_id,
+                "status": "video_chat_starting",
+            },
+        )
 
         # TODO: Initialize video chat session with gRPC video service
         # TODO: Send connection details to both clients
@@ -215,15 +215,15 @@ async def respond_to_ding(response: DingResponse):
         )
 
     else:
-        # Request declined
-        session_data["status"] = "declined"
-
-        # TODO: Notify scanner about the response
+        await store.update_session(
+            response.session_id,
+            {"status": "declined", "closed_at": now},
+        )
 
         response_messages = {
             "reject": "Door owner declined the request",
             "busy": "Door owner is busy, please try later",
-            "custom": response.custom_message or "Custom response"
+            "custom": response.custom_message or "Custom response",
         }
 
         message = response_messages.get(response.response_type.value, "Unknown response")
@@ -247,10 +247,9 @@ async def generate_qr_code(request: QRCodeGenerationRequest):
     TODO: Implement QR code expiry and rotation
     TODO: Add usage analytics and tracking
     """
-    logger.info(f"QR code generation request for door owner: {request.door_owner_id}")
+    logger.info("QR code generation request for door owner: %s", request.door_owner_id)
 
-    # Generate unique QR code ID
-    qr_code_id = f"qr_{request.door_owner_id}_{int(time.time())}"
+    qr_code_id = f"qr_{uuid.uuid4().hex}"
 
     # Create QR code data - this would be the URL that mobile apps scan
     # TODO: Configure base URL from environment
@@ -283,10 +282,33 @@ async def generate_qr_code(request: QRCodeGenerationRequest):
         "created_at": datetime.now(),
         "expires_at": request.expiry_date,
         "scan_count": 0,
-        "last_scanned": None
+        "last_scanned": None,
     }
 
-    app_state["qr_codes"][qr_code_id] = qr_metadata
+    await store.add_qr_code(qr_code_id, qr_metadata)
+
+    existing_contact = await store.get_owner_contact(request.door_owner_id)
+    sms_recipients = (
+        request.sms_recipients
+        if request.sms_recipients is not None
+        else (existing_contact.sms_recipients if existing_contact else [])
+    )
+    teams_webhook = (
+        request.teams_webhook_url
+        if request.teams_webhook_url is not None
+        else (existing_contact.teams_webhook_url if existing_contact else None)
+    )
+
+    metadata = dict(existing_contact.metadata) if existing_contact else {}
+    metadata.update({"last_qr_code_id": qr_code_id, "label": request.label})
+
+    contact = OwnerContact(
+        door_owner_id=request.door_owner_id,
+        sms_recipients=list(sms_recipients or []),
+        teams_webhook_url=teams_webhook,
+        metadata=metadata,
+    )
+    await store.set_owner_contact(contact)
 
     return QRCodeGenerationResponse(
         qr_code_id=qr_code_id,
@@ -305,10 +327,9 @@ async def get_session_info(session_id: str):
     TODO: Add authentication to restrict access
     TODO: Add session history and analytics
     """
-    if session_id not in app_state["sessions"]:
+    session_data = await store.get_session(session_id)
+    if not session_data:
         raise HTTPException(status_code=404, detail="Session not found")
-
-    session_data = app_state["sessions"][session_id]
 
     return VideoSessionInfo(
         session_id=session_data["session_id"],
@@ -334,9 +355,9 @@ async def websocket_notifications(websocket: WebSocket, door_owner_id: str):
     TODO: Add message queuing for offline clients
     """
     await websocket.accept()
-    app_state["websocket_connections"][door_owner_id] = websocket
+    await store.add_websocket(door_owner_id, websocket)
 
-    logger.info(f"WebSocket connection established for door owner: {door_owner_id}")
+    logger.info("WebSocket connection established for door owner: %s", door_owner_id)
 
     try:
         while True:
@@ -351,52 +372,48 @@ async def websocket_notifications(websocket: WebSocket, door_owner_id: str):
             })
 
     except WebSocketDisconnect:
-        logger.info(f"WebSocket disconnected for door owner: {door_owner_id}")
+        logger.info("WebSocket disconnected for door owner: %s", door_owner_id)
     except Exception as e:
-        logger.error(f"WebSocket error for {door_owner_id}: {e}")
+        logger.error("WebSocket error for %s: %s", door_owner_id, e)
     finally:
-        # Clean up connection
-        app_state["websocket_connections"].pop(door_owner_id, None)
+        await store.pop_websocket(door_owner_id)
 
 
 async def _notify_door_owner(door_owner_id: str, session_data: dict):
-    """
-    Send notification to door owner about a new ding.
-
-    This function tries multiple notification methods:
-    1. WebSocket (if connected)
-    2. gRPC stream (if available)
-    3. Push notification (fallback)
-
-    TODO: Implement proper notification prioritization
-    TODO: Add notification delivery confirmation
-    TODO: Implement retry logic for failed notifications
-    """
+    """Send WebSocket plus out-of-band notifications for a new ding."""
     notification = {
         "type": "ding_request",
         "session_id": session_data["session_id"],
         "scanner_device_id": session_data["scanner_device_id"],
         "message": "Someone is at your door and wants to talk!",
         "timestamp": datetime.now().isoformat(),
-        "scanner_location": session_data.get("scanner_location")
+        "scanner_location": session_data.get("scanner_location"),
     }
 
-    # Try WebSocket first
-    if door_owner_id in app_state["websocket_connections"]:
+    websocket = await store.get_websocket(door_owner_id)
+    if websocket:
         try:
-            websocket = app_state["websocket_connections"][door_owner_id]
             await websocket.send_json(notification)
-            logger.info(f"WebSocket notification sent to {door_owner_id}")
-            return
-        except Exception as e:
-            logger.error(f"Failed to send WebSocket notification to {door_owner_id}: {e}")
-            # Remove failed connection
-            app_state["websocket_connections"].pop(door_owner_id, None)
+            logger.info("WebSocket notification sent to %s", door_owner_id)
+        except Exception as exc:
+            logger.error("Failed to send WebSocket notification to %s: %s", door_owner_id, exc)
+            await store.pop_websocket(door_owner_id)
 
-    # TODO: Try gRPC notification stream
-    # TODO: Fall back to push notification service
+    contact = await store.get_owner_contact(door_owner_id)
+    if not contact:
+        contact = OwnerContact(door_owner_id=door_owner_id)
 
-    logger.warning(f"No active notification channel for door owner: {door_owner_id}")
+    asyncio.create_task(_dispatch_external_notifications(contact, session_data))
+
+
+async def _dispatch_external_notifications(contact: OwnerContact, session_data: dict) -> None:
+    try:
+        await notification_manager.notify_ding(contact, session_data)
+    except Exception:
+        logger.exception(
+            "Failed to dispatch external notifications for session %s",
+            session_data.get("session_id"),
+        )
 
 
 # TODO: Add middleware for request logging
