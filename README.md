@@ -91,7 +91,14 @@ DING_TEAMS_TIMEOUT=5
 # Environment
 DING_ENVIRONMENT=development
 DING_DEBUG=true
+
+# Doorbell settings
+DING_QR_SCAN_BASE_URL=https://ding.app/scan
+DING_ESTIMATED_RESPONSE_TIME_SECONDS=30
 ```
+
+- `DING_QR_SCAN_BASE_URL` controls the base URL embedded in generated QR codes.
+- `DING_ESTIMATED_RESPONSE_TIME_SECONDS` sets the default response-time hint returned after scans.
 
 ## Development Status
 

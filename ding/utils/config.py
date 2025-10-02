@@ -66,6 +66,16 @@ class NotificationConfig:
 
 
 @dataclass
+class DoorbellConfig:
+    """Doorbell-specific application settings."""
+
+    qr_scan_base_url: str = "https://ding.app/scan"
+    estimated_response_time_seconds: int = 30
+
+    # TODO: Add configuration for visitor messaging templates
+
+
+@dataclass
 class AppConfig:
     """Main application configuration."""
 
@@ -76,6 +86,7 @@ class AppConfig:
     server: ServerConfig = field(default_factory=ServerConfig)
     database: DatabaseConfig = field(default_factory=DatabaseConfig)
     notifications: NotificationConfig = field(default_factory=NotificationConfig)
+    doorbell: DoorbellConfig = field(default_factory=DoorbellConfig)
 
     # TODO: Add feature flags
     # enable_analytics: bool = True
@@ -104,6 +115,7 @@ def load_config() -> AppConfig:
     config.server.workers = int(os.getenv("DING_WORKERS", str(config.server.workers)))
 
     _load_notification_config(config)
+    _load_doorbell_config(config)
 
     # TODO: Load database configuration
     # TODO: Load notification service configuration
@@ -156,6 +168,25 @@ def _load_notification_config(config: AppConfig) -> None:
             notifications.teams_timeout_seconds = float(timeout_raw)
         except ValueError:
             pass
+
+
+def _load_doorbell_config(config: AppConfig) -> None:
+    doorbell = config.doorbell
+
+    qr_base_raw = os.getenv("DING_QR_SCAN_BASE_URL")
+    if qr_base_raw:
+        doorbell.qr_scan_base_url = qr_base_raw.rstrip("/")
+    else:
+        doorbell.qr_scan_base_url = doorbell.qr_scan_base_url.rstrip("/")
+
+    response_time_raw = os.getenv("DING_ESTIMATED_RESPONSE_TIME_SECONDS")
+    if response_time_raw:
+        try:
+            response_time = int(response_time_raw)
+        except ValueError:
+            return
+        if response_time > 0:
+            doorbell.estimated_response_time_seconds = response_time
 
 
 def get_config() -> AppConfig:

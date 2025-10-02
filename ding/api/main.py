@@ -144,7 +144,7 @@ async def scan_qr_code(request: QRCodeScanRequest):
         message="QR code scanned successfully. Door owner has been notified.",
         session_id=session_id,
         door_owner_id=door_owner_id,
-        estimated_response_time=30  # TODO: Make this configurable
+        estimated_response_time=config.doorbell.estimated_response_time_seconds,
     )
 
 
@@ -240,8 +240,8 @@ async def generate_qr_code(request: QRCodeGenerationRequest):
     qr_code_id = f"qr_{uuid.uuid4().hex}"
 
     # Create QR code data - this would be the URL that mobile apps scan
-    # TODO: Configure base URL from environment
-    qr_data = f"https://ding.app/scan/{qr_code_id}"
+    qr_scan_base_url = config.doorbell.qr_scan_base_url
+    qr_data = f"{qr_scan_base_url}/{qr_code_id}"
 
     # Generate QR code image
     qr = qrcode.QRCode(
